@@ -49,40 +49,17 @@
  *	   fix oversampling
  */
 
-#include <errno.h>
-#include <signal.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include "base.hpp"
+#include "Dongle.hpp"
+#include "Demod.hpp"
+#include "Output.hpp"
+#include "Controller.hpp"
+#include "filters.hpp"
 
-#ifndef _WIN32
-#include <unistd.h>
-#else
-#include <windows.h>
-#include <fcntl.h>
-#include <io.h>
-#include "getopt/getopt.h"
-#define usleep(x) Sleep(x/1000)
-#if defined(_MSC_VER) && (_MSC_VER < 1800)
-#define round(x) (x > 0.0 ? floor(x + 0.5): ceil(x - 0.5))
-#endif
-#define _USE_MATH_DEFINES
-#endif
-
-#include <math.h>
-#include <pthread.h>
 
 #include "convenience.h"
-#include <SoapySDR/Device.h>
-#include <SoapySDR/Formats.h>
 
-#define DEFAULT_SAMPLE_RATE		24000
-#define DEFAULT_BUF_LENGTH		(1 * 16384)
-#define MAXIMUM_OVERSAMPLE		16
-#define MAXIMUM_BUF_LENGTH		(MAXIMUM_OVERSAMPLE * DEFAULT_BUF_LENGTH)
-#define BUFFER_DUMP				4096
 
-#define FREQUENCIES_LIMIT		1000
 
 static volatile int do_exit = 0;
 static int lcm_post[17] = {1,1,1,3,1,5,3,7,1,9,5,11,3,13,7,15,1};
@@ -101,90 +78,11 @@ static double levelSum = 0.0;
 
 static int tmp_stdout = -1;
 
-struct dongle_state
-{
-	int	  exit_flag;
-	pthread_t thread;
-	SoapySDRDevice *dev;
-	SoapySDRStream *stream;
-	size_t channel;
-	char	*dev_query;
-	uint32_t freq;
-	uint32_t rate;
-	uint32_t bandwidth;
-	char *gain_str;
-	int16_t  buf16[MAXIMUM_BUF_LENGTH];
-	int	  ppm_error;
-	int	  offset_tuning;
-	int	  direct_sampling;
-	int	  mute;
-	struct demod_state *demod_target;
-};
 
-struct demod_state
-{
-	int	  exit_flag;
-	pthread_t thread;
-	int16_t  lowpassed[MAXIMUM_BUF_LENGTH];
-	int	  lp_len;
-	int16_t  lp_i_hist[10][6];
-	int16_t  lp_q_hist[10][6];
-	int16_t  result[MAXIMUM_BUF_LENGTH];
-	int16_t  droop_i_hist[9];
-	int16_t  droop_q_hist[9];
-	int	  result_len;
-	int	  rate_in;
-	int	  rate_out;
-	int	  rate_out2;
-	int	  now_r, now_j;
-	int	  pre_r, pre_j;
-	int	  prev_index;
-	int	  downsample;	/* min 1, max 256 */
-	int	  post_downsample;
-	int	  output_scale;
-	int	  squelch_level, conseq_squelch, squelch_hits, terminate_on_squelch, squelch_zero;
-	int	  downsample_passes;
-	int	  comp_fir_size;
-	int	  custom_atan;
-	int	  deemph, deemph_a;
-	int	  now_lpr;
-	int	  prev_lpr_index;
-	int	  dc_block_audio, dc_avg, adc_block_const;
-	int	  dc_block_raw, dc_avgI, dc_avgQ, rdc_block_const;
-	void	 (*mode_demod)(struct demod_state*);
-	pthread_rwlock_t rw;
-	pthread_cond_t ready;
-	pthread_mutex_t ready_m;
-	struct output_state *output_target;
-};
 
-struct output_state
-{
-	int	  exit_flag;
-	pthread_t thread;
-	FILE	 *file;
-	char	 *filename;
-	int16_t  result[MAXIMUM_BUF_LENGTH];
-	int	  result_len;
-	int	  rate;
-	int	  wav_format;
-	pthread_rwlock_t rw;
-	pthread_cond_t ready;
-	pthread_mutex_t ready_m;
-};
 
-struct controller_state
-{
-	int	  exit_flag;
-	pthread_t thread;
-	uint32_t freqs[FREQUENCIES_LIMIT];
-	int	  freq_len;
-	int	  freq_now;
-	int	  edge;
-	int	  wb_mode;
-	pthread_cond_t hop;
-	pthread_mutex_t hop_m;
-};
+
+
 
 // multiple of these, eventually
 struct dongle_state dongle;
@@ -282,22 +180,7 @@ static void sighandler(int signum)
 #define safe_cond_signal(n, m) pthread_mutex_lock(m); pthread_cond_signal(n); pthread_mutex_unlock(m)
 #define safe_cond_wait(n, m) pthread_mutex_lock(m); pthread_cond_wait(n, m); pthread_mutex_unlock(m)
 
-/* {length, coef, coef, coef}  and scaled by 2^15
-   for now, only length 9, optimal way to get +85% bandwidth */
-#define CIC_TABLE_MAX 10
-int cic_9_tables[][10] = {
-	{0,},
-	{9, -156,  -97, 2798, -15489, 61019, -15489, 2798,  -97, -156},
-	{9, -128, -568, 5593, -24125, 74126, -24125, 5593, -568, -128},
-	{9, -129, -639, 6187, -26281, 77511, -26281, 6187, -639, -129},
-	{9, -122, -612, 6082, -26353, 77818, -26353, 6082, -612, -122},
-	{9, -120, -602, 6015, -26269, 77757, -26269, 6015, -602, -120},
-	{9, -120, -582, 5951, -26128, 77542, -26128, 5951, -582, -120},
-	{9, -119, -580, 5931, -26094, 77505, -26094, 5931, -580, -119},
-	{9, -119, -578, 5921, -26077, 77484, -26077, 5921, -578, -119},
-	{9, -119, -577, 5917, -26067, 77473, -26067, 5917, -577, -119},
-	{9, -199, -362, 5303, -25505, 77489, -25505, 5303, -362, -199},
-};
+
 
 #if defined(_MSC_VER) && (_MSC_VER < 1800)
 double log2(double n)
@@ -370,21 +253,7 @@ void low_pass(struct demod_state *d)
 	d->lp_len = i2;
 }
 
-int low_pass_simple(int16_t *signal2, int len, int step)
-// no wrap around, length must be multiple of step
-{
-	int i, i2, sum;
-	for(i=0; i < len; i+=step) {
-		sum = 0;
-		for(i2=0; i2<step; i2++) {
-			sum += (int)signal2[i + i2];
-		}
-		//signal2[i/step] = (int16_t)(sum / step);
-		signal2[i/step] = (int16_t)(sum);
-	}
-	signal2[i/step + 1] = signal2[i/step];
-	return len / step;
-}
+
 
 void low_pass_real(struct demod_state *s)
 /* simple square window FIR */
@@ -408,61 +277,9 @@ void low_pass_real(struct demod_state *s)
 	s->result_len = i2;
 }
 
-void fifth_order(int16_t *data, int length, int16_t *hist)
-/* for half of interleaved data */
-{
-	int i;
-	int16_t a, b, c, d, e, f;
-	a = hist[1];
-	b = hist[2];
-	c = hist[3];
-	d = hist[4];
-	e = hist[5];
-	f = data[0];
-	/* a downsample should improve resolution, so don't fully shift */
-	data[0] = (a + (b+e)*5 + (c+d)*10 + f) >> 4;
-	for (i=4; i<length; i+=4) {
-		a = c;
-		b = d;
-		c = e;
-		d = f;
-		e = data[i-2];
-		f = data[i];
-		data[i/2] = (a + (b+e)*5 + (c+d)*10 + f) >> 4;
-	}
-	/* archive */
-	hist[0] = a;
-	hist[1] = b;
-	hist[2] = c;
-	hist[3] = d;
-	hist[4] = e;
-	hist[5] = f;
-}
 
-void generic_fir(int16_t *data, int length, int *fir, int16_t *hist)
-/* Okay, not at all generic.  Assumes length 9, fix that eventually. */
-{
-	int d, temp, sum;
-	for (d=0; d<length; d+=2) {
-		temp = data[d];
-		sum = 0;
-		sum += (hist[0] + hist[8]) * fir[1];
-		sum += (hist[1] + hist[7]) * fir[2];
-		sum += (hist[2] + hist[6]) * fir[3];
-		sum += (hist[3] + hist[5]) * fir[4];
-		sum +=			hist[4]  * fir[5];
-		data[d] = sum >> 15 ;
-		hist[0] = hist[1];
-		hist[1] = hist[2];
-		hist[2] = hist[3];
-		hist[3] = hist[4];
-		hist[4] = hist[5];
-		hist[5] = hist[6];
-		hist[6] = hist[7];
-		hist[7] = hist[8];
-		hist[8] = temp;
-	}
-}
+
+
 
 /* define our own complex math ops
    because ARMv5 has no hardware float */
@@ -719,42 +536,7 @@ void dc_block_raw_filter(struct demod_state *fm, int16_t *buf, int len)
 	fm->dc_avgI = avgI;
 	fm->dc_avgQ = avgQ;
 }
-int mad(int16_t *samples, int len, int step)
-/* mean average deviation */
-{
-	int i=0, sum=0, ave=0;
-	if (len == 0)
-		{return 0;}
-	for (i=0; i<len; i+=step) {
-		sum += samples[i];
-	}
-	ave = sum / (len * step);
-	sum = 0;
-	for (i=0; i<len; i+=step) {
-		sum += abs(samples[i] - ave);
-	}
-	return sum / (len / step);
-}
 
-int rms(int16_t *samples, int len, int step)
-/* largely lifted from rtl_power */
-{
-	int i;
-	long p, t, s;
-	double dc, err;
-
-	p = t = 0L;
-	for (i=0; i<len; i+=step) {
-		s = (long)samples[i];
-		t += s;
-		p += s * s;
-	}
-	/* correct for dc offset in squares */
-	dc = (double)(t*step) / (double)len;
-	err = t * 2 * dc - dc * dc * len;
-
-	return (int)sqrt((p-err) / len);
-}
 
 void full_demod(struct demod_state *d)
 {
