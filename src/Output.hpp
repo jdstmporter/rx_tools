@@ -25,7 +25,7 @@ struct output_state
 	pthread_mutex_t ready_m;
 };
 
-class Output {
+struct Output {
 	int	  exit_flag = 0;
 	pthread_t thread = 0;
 	FILE	 *file = nullptr;
@@ -34,12 +34,16 @@ class Output {
 	int	  result_len = 0;
 	int	  rate = 0;
 	bool	  wav_format = false;
+	bool tmp_stdout = false;
 	pthread_rwlock_t rw;
 	pthread_cond_t ready;
 	pthread_mutex_t ready_m;
 
 	Output();
 	virtual ~Output();
+
+	void threadFunction();
+	int generateHeader(const bool isRaw);
 };
 
 #endif /* SRC_OUTPUT_HPP_ */

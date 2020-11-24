@@ -8,11 +8,12 @@
 #include "Demod.hpp"
 #include "filters.hpp"
 #include "demodulators.hpp"
+#include "SDR.hpp"
 #include "Output.hpp"
 #include "Controller.hpp"
 
 
-Demod::Demod(output_state *output) :  output_target(output) {
+Demod::Demod() {
 	mode_demod=std::make_shared<FMDemodulator>();
 	pthread_rwlock_init(&rw, NULL);
 	pthread_cond_init(&ready, NULL);
@@ -194,15 +195,16 @@ void Demod::full_demod() {
 
 }
 
-void Demod::threadFunction(Controller *controller) {
-		bool do_exit = false;
-		while (!do_exit) {
+void Demod::threadFunction() {
+		auto controller = SDR::shared()->controller;
+		auto output_target = SDR::shared()->output;
+		while (!doExit) {
 			safe_cond_wait(&ready, &ready_m);
 			pthread_rwlock_wrlock(&rw);
 			full_demod();
 			pthread_rwlock_unlock(&rw);
 			if (exit_flag) {
-				do_exit = true;
+				doExit.set();
 			}
 			bool squelch_active = (squelch_level > 0 && squelch_hits > conseq_squelch);
 			if (squelch_active && !squelch_zero) {

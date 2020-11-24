@@ -18,6 +18,9 @@ struct Demodulator {
 	enum class Kind {
 		FM,
 		RAW,
+		AM,
+		LSB,
+		USB,
 		NUL
 	};
 
@@ -30,6 +33,26 @@ struct Demodulator {
 struct FMDemodulator : public Demodulator {
 
 	FMDemodulator() : Demodulator(Kind::FM) {};
+	virtual void demodulate(Demod *) {}
+};
+
+struct AMDemodulator : public Demodulator {
+	AMDemodulator() : Demodulator(Kind::AM) {};
+	virtual void demodulate(Demod *) {}
+};
+
+struct LSBDemodulator : public Demodulator {
+	LSBDemodulator() : Demodulator(Kind::LSB) {};
+	virtual void demodulate(Demod *) {}
+};
+
+struct USBDemodulator : public Demodulator {
+	USBDemodulator() : Demodulator(Kind::USB) {};
+	virtual void demodulate(Demod *) {}
+};
+
+struct RawDemodulator : public Demodulator {
+	RawDemodulator() : Demodulator(Kind::RAW) {};
 	virtual void demodulate(Demod *) {}
 };
 

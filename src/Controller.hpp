@@ -9,7 +9,7 @@
 #define SRC_CONTROLLER_HPP_
 
 #include "base.hpp"
-
+#include "Dongle.hpp"
 
 struct controller_state
 {
@@ -24,7 +24,9 @@ struct controller_state
 	pthread_mutex_t hop_m;
 };
 
-class Controller {
+struct Controller {
+	static int verbosity = 0;
+
 	int	  exit_flag = 0;
 	pthread_t thread = 0;
 	uint32_t freqs[FREQUENCIES_LIMIT];
@@ -35,8 +37,14 @@ class Controller {
 	pthread_cond_t hop;
 	pthread_mutex_t hop_m;
 
+	int ACTUAL_BUF_LENGTH();
 	Controller();
 	virtual ~Controller();
+
+	void frequency_range( char *arg);
+	void sanity_checks();
+	void optimal_settings(int freq, int rate);
+	void threadFunction();
 };
 
 #endif /* SRC_CONTROLLER_HPP_ */

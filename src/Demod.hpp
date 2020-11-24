@@ -9,6 +9,8 @@
 #define DEMOD_HPP_
 
 #include "base.hpp"
+#include "demodulators.hpp"
+#include "Output.hpp"
 
 struct output_state;
 
@@ -51,9 +53,7 @@ struct demod_state
 };
 
 
-struct Demodulator;
-struct Output;
-struct Controller;
+
 
 struct Demod {
 	int	  exit_flag = 0;
@@ -100,9 +100,8 @@ struct Demod {
 	pthread_rwlock_t rw;
 	pthread_cond_t ready;
 	pthread_mutex_t ready_m;
-	Output *output_target;
 
-	Demod(output_state *output = nullptr);
+	Demod();
 	virtual ~Demod();
 
 	void low_pass();
@@ -111,7 +110,9 @@ struct Demod {
 	void low_pass_real();
 	void dc_block_raw_filter(int16_t *buf,int len);
 	void full_demod();
-	void threadFunction(Controller *);
+	void threadFunction();
+
+	Demodulator::Kind demodKind() { return mode_demod->kind; }
 };
 
 #endif /* DEMOD_HPP_ */

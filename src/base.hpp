@@ -20,6 +20,7 @@
 
 #include <SoapySDR/Device.h>
 #include <SoapySDR/Formats.h>
+#include "ExitFlag.hpp"
 
 #define DEFAULT_SAMPLE_RATE		24000
 #define DEFAULT_BUF_LENGTH		(1 * 16384)
@@ -31,6 +32,7 @@
 
 #define safe_cond_signal(n, m) pthread_mutex_lock(m); pthread_cond_signal(n); pthread_mutex_unlock(m)
 #define safe_cond_wait(n, m) pthread_mutex_lock(m); pthread_cond_wait(n, m); pthread_mutex_unlock(m)
+
 
 
 

@@ -90,6 +90,8 @@ struct demod_state demod;
 struct output_state output;
 struct controller_state controller;
 
+
+
 void usage(void)
 {
 	fprintf(stderr,
@@ -1280,3 +1282,303 @@ int main(int argc, char **argv)
 }
 
 // vim: tabstop=8:softtabstop=8:shiftwidth=8:noexpandtab
+
+int main2(int argc, char **argv)
+{
+#ifndef _WIN32
+	struct sigaction sigact;
+#endif
+	int custom_ppm = 0;
+	int r, opt;
+	int timeConstant = 75; /* default: U.S. 75 uS */
+	int rtlagc = 0;
+	char *antenna_str = NULL;
+
+	Output output_;
+	Demod demod_(&output_);
+	Dongle dongle_(&demod_);
+	Controller controller_(dongle_);
+	dongle_init(&dongle);
+	demod_init(&demod);
+	output_init(&output);
+	controller_init(&controller);
+	dongle.dev_query = "";
+
+	while ((opt = getopt(argc, argv, "a:C:d:f:g:s:b:l:L:o:t:r:p:E:q:F:A:M:c:h:w:v")) != -1) {
+		switch (opt) {
+		case 'a':
+			antenna_str = optarg;
+			break;
+		case 'C':
+			dongle.channel = (int)atoi(optarg);
+			break;
+		case 'd':
+			dongle.dev_query = optarg;
+			break;
+		case 'f':
+			if (controller.freq_len >= FREQUENCIES_LIMIT) {
+				break;}
+			if (strchr(optarg, ':'))
+				{frequency_range(&controller, optarg);}
+			else
+			{
+				controller.freqs[controller.freq_len] = (uint32_t)atofs(optarg);
+				controller.freq_len++;
+			}
+			break;
+		case 'g':
+			dongle.gain_str = optarg;
+			break;
+		case 'l':
+			demod.squelch_level = (int)atof(optarg);
+			break;
+		case 'L':
+			printLevels = (int)atof(optarg);
+			break;
+		case 's':
+			demod.rate_in = (uint32_t)atofs(optarg);
+			demod.rate_out = (uint32_t)atofs(optarg);
+			break;
+		case 'r':
+			output.rate = (int)atofs(optarg);
+			demod.rate_out2 = (int)atofs(optarg);
+			break;
+		case 'o':
+			fprintf(stderr, "Warning: -o is very buggy\n");
+			demod.post_downsample = (int)atof(optarg);
+			if (demod.post_downsample < 1 || demod.post_downsample > MAXIMUM_OVERSAMPLE) {
+				fprintf(stderr, "Oversample must be between 1 and %i\n", MAXIMUM_OVERSAMPLE);}
+			break;
+		case 't':
+			demod.conseq_squelch = (int)atof(optarg);
+			if (demod.conseq_squelch < 0) {
+				demod.conseq_squelch = -demod.conseq_squelch;
+				demod.terminate_on_squelch = 1;
+			}
+			break;
+		case 'p':
+			dongle.ppm_error = atoi(optarg);
+			custom_ppm = 1;
+			break;
+		case 'E':
+			if (strcmp("edge",  optarg) == 0) {
+				controller.edge = 1;}
+			if (strcmp("dc", optarg) == 0 || strcmp("adc", optarg) == 0) {
+				demod.dc_block_audio = 1;}
+			if (strcmp("rdc", optarg) == 0) {
+				demod.dc_block_raw = 1;}
+			if (strcmp("deemp",  optarg) == 0) {
+				demod.deemph = 1;}
+			if (strcmp("direct",  optarg) == 0) {
+				dongle.direct_sampling = 1;}
+			if (strcmp("no-mod",  optarg) == 0) {
+				dongle.direct_sampling = 3;}
+			if (strcmp("offset",  optarg) == 0) {
+				dongle.offset_tuning = 1;}
+			if (strcmp("rtlagc", optarg) == 0 || strcmp("agc", optarg) == 0) {
+				rtlagc = 1;}
+			if (strcmp("zero", optarg) == 0) {
+				demod.squelch_zero = 1;}
+			if (strcmp("wav",  optarg) == 0) {
+				output.wav_format = 1;}
+			break;
+		case 'q':
+			demod.rdc_block_const = atoi(optarg);
+			break;
+		case 'F':
+			demod.downsample_passes = 1;  /* truthy placeholder */
+			demod.comp_fir_size = atoi(optarg);
+			break;
+		case 'A':
+			if (strcmp("std",  optarg) == 0) {
+				demod.custom_atan = 0;}
+			if (strcmp("fast", optarg) == 0) {
+				demod.custom_atan = 1;}
+			if (strcmp("lut",  optarg) == 0) {
+				atan_lut_init();
+				demod.custom_atan = 2;}
+			if (strcmp("ale", optarg) == 0) {
+				demod.custom_atan = 3;}
+			break;
+		case 'M':
+			if (strcmp("nbfm",  optarg) == 0 || strcmp("nfm",  optarg) == 0 || strcmp("fm",  optarg) == 0) {
+				demod.mode_demod = &fm_demod;}
+			if (strcmp("raw",  optarg) == 0 || strcmp("iq",  optarg) == 0) {
+				demod.mode_demod = &raw_demod;}
+			if (strcmp("am",  optarg) == 0) {
+				demod.mode_demod = &am_demod;}
+			if (strcmp("usb", optarg) == 0) {
+				demod.mode_demod = &usb_demod;}
+			if (strcmp("lsb", optarg) == 0) {
+				demod.mode_demod = &lsb_demod;}
+			if (strcmp("wbfm",  optarg) == 0 || strcmp("wfm",  optarg) == 0) {
+				controller.wb_mode = 1;
+				demod.mode_demod = &fm_demod;
+				demod.rate_in = 170000;
+				demod.rate_out = 170000;
+				demod.rate_out2 = 32000;
+				output.rate = 32000;
+				demod.custom_atan = 1;
+				//demod.post_downsample = 4;
+				demod.deemph = 1;
+				demod.squelch_level = 0;}
+			break;
+		case 'c':
+			if (strcmp("us",  optarg) == 0)
+				timeConstant = 75;
+			else if (strcmp("eu", optarg) == 0)
+				timeConstant = 50;
+			else
+				timeConstant = (int)atof(optarg);
+			break;
+		case 'v':
+			++verbosity;
+			break;
+		case 'w':
+			dongle.bandwidth = (uint32_t)atofs(optarg);
+			if (dongle.bandwidth)
+				dongle.offset_tuning = 1;		/* automatically switch offset tuning, when using bandwidth filter */
+			break;
+		case 'h':
+		case '?':
+		default:
+			usage();
+			break;
+		}
+	}
+
+	if (verbosity)
+		fprintf(stderr, "verbosity set to %d\n", verbosity);
+
+	/* quadruple sample_rate to limit to Δθ to ±π/2 */
+	demod.rate_in *= demod.post_downsample;
+
+	if (!output.rate) {
+		output.rate = demod.rate_out;}
+
+	sanity_checks();
+
+	if (controller.freq_len > 1) {
+		demod.terminate_on_squelch = 0;}
+
+	if (argc <= optind) {
+		output.filename = "-";
+	} else {
+		output.filename = argv[optind];
+	}
+
+	ACTUAL_BUF_LENGTH = lcm_post[demod.post_downsample] * DEFAULT_BUF_LENGTH;
+
+	tmp_stdout = suppress_stdout_start();
+	verbose_device_search(dongle.dev_query, &dongle.dev);
+	if (!dongle.dev) {
+		fprintf(stderr, "Failed to open sdr device matching '%s'.\n", dongle.dev_query);
+		exit(1);
+	}
+	verbose_setup_stream(dongle.dev, &dongle.stream, dongle.channel, SOAPY_SDR_CS16);
+
+#ifndef _WIN32
+	sigact.sa_handler = sighandler;
+	sigemptyset(&sigact.sa_mask);
+	sigact.sa_flags = 0;
+	sigaction(SIGINT, &sigact, NULL);
+	sigaction(SIGTERM, &sigact, NULL);
+	sigaction(SIGQUIT, &sigact, NULL);
+	sigaction(SIGPIPE, &sigact, NULL);
+	signal(SIGPIPE, SIG_IGN);
+#else
+	SetConsoleCtrlHandler( (PHANDLER_ROUTINE) sighandler, TRUE );
+#endif
+
+	if (demod.deemph) {
+		double tc = (double)timeConstant * 1e-6;
+		demod.deemph_a = (int)round(1.0/((1.0-exp(-1.0/(demod.rate_out * tc)))));
+		if (verbosity)
+			fprintf(stderr, "using wbfm deemphasis filter with time constant %d us\n", timeConstant );
+	}
+
+	/* Set the antenna */
+	if (NULL != antenna_str) {
+		r = verbose_antenna_str_set(dongle.dev, dongle.channel, antenna_str);
+		if (r != 0) {
+			fprintf(stderr, "Failed to set antenna");
+		}
+	}
+
+	/* Set the tuner gain */
+	if (dongle.gain_str == NULL) {
+		verbose_auto_gain(dongle.dev, dongle.channel);
+	} else {
+		verbose_gain_str_set(dongle.dev, dongle.gain_str, dongle.channel);
+	}
+
+	SoapySDRDevice_setGainMode(dongle.dev, SOAPY_SDR_RX, dongle.channel, rtlagc);
+
+	if (custom_ppm) verbose_ppm_set(dongle.dev, dongle.ppm_error, dongle.channel);
+
+ 	verbose_set_bandwidth(dongle.dev, dongle.bandwidth, dongle.channel);
+
+	if (verbosity && dongle.bandwidth)
+	{
+		fprintf(stderr, "Supported bandwidth values in kHz:\n");
+		size_t bw_count = 0;
+		// TODO: well, this is deprecated by getBandwidthRange? SoapySDRRange
+		double *bandwidths = SoapySDRDevice_listBandwidths(dongle.dev, SOAPY_SDR_RX, dongle.channel, &bw_count);
+		for (size_t k = 0; k < bw_count; ++k) {
+			fprintf(stderr, "%.1f ", bandwidths[k]);
+		}
+		fprintf(stderr,"\n");
+	}
+
+	if (strcmp(output.filename, "-") == 0) { /* Write samples to stdout */
+		output.file = stdout;
+#ifdef _WIN32
+		_setmode(_fileno(output.file), _O_BINARY);
+#endif
+	} else {
+		output.file = fopen(output.filename, "wb");
+		if (!output.file) {
+			fprintf(stderr, "Failed to open %s\n", output.filename);
+			exit(1);
+		}
+	}
+
+	//r = rtlsdr_set_testmode(dongle.dev, 1);
+
+	/* Reset endpoint before we start reading from it (mandatory) */
+	verbose_reset_buffer(dongle.dev);
+
+	pthread_create(&controller.thread, NULL, controller_thread_fn, (void *)(&controller));
+	usleep(100000);
+	pthread_create(&output.thread, NULL, output_thread_fn, (void *)(&output));
+	pthread_create(&demod.thread, NULL, demod_thread_fn, (void *)(&demod));
+	pthread_create(&dongle.thread, NULL, dongle_thread_fn, (void *)(&dongle));
+
+	while (!do_exit) {
+		usleep(100000);
+	}
+
+	SoapySDRDevice_deactivateStream(dongle.dev, dongle.stream, 0, 0);
+	pthread_join(dongle.thread, NULL);
+	safe_cond_signal(&demod.ready, &demod.ready_m);
+	pthread_join(demod.thread, NULL);
+	safe_cond_signal(&output.ready, &output.ready_m);
+	pthread_join(output.thread, NULL);
+	safe_cond_signal(&controller.hop, &controller.hop_m);
+	pthread_join(controller.thread, NULL);
+
+	//dongle_cleanup(&dongle);
+	demod_cleanup(&demod);
+	output_cleanup(&output);
+	controller_cleanup(&controller);
+
+	if (output.file != stdout) {
+		fclose(output.file);}
+
+	SoapySDRDevice_closeStream(dongle.dev, dongle.stream);
+	SoapySDRDevice_unmake(dongle.dev);
+	return EXIT_SUCCESS;
+}
+
+// vim: tabstop=8:softtabstop=8:shiftwidth=8:noexpandtab
+

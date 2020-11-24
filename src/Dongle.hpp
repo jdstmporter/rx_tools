@@ -9,9 +9,9 @@
 #define SRC_DONGLE_HPP_
 
 #include "base.hpp"
+#include "Demod.hpp"
 
-struct demod_state;
-struct Demod;
+
 
 struct dongle_state
 {
@@ -52,11 +52,11 @@ struct Dongle {
 	bool	  offset_tuning = false;
 	bool	  direct_sampling = false;
 	int	  mute = 0;
-	Demod *demod_target;
+
 
 	void rotate16_90(uint32_t len);
 
-	Dongle(demod_state *demod = nullptr) : demod_target(demod) {};
+	Dongle() = default;
 	virtual ~Dongle() = default;
 
 	size_t samplesPerBuffer() const { return MAXIMUM_BUF_LENGTH/2; }
@@ -73,15 +73,12 @@ struct Dongle {
 	}
 
 
-	void unloadBuffer(int16_t *target,uint32_t len) {
-		memcpy(target, buf16, 2*len);
-	}
 
-	void rotate16_90(uint32_t len) {
 
-	}
+	void rotate16_90(uint32_t len);
 
-	void process(int16_t *buf,uint32_t len);
+	void rtlsdr_callback(int16_t *buf,uint32_t len);
+	void threadFunction();
 };
 
 
